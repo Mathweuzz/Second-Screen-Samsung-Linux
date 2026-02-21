@@ -97,7 +97,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    // Inicializa a conexão com o Wayland via DBus antes de aceitar conexões web.
+    // Initialize Wayland connection before accepting web connections.
     init_wayland_capture();
 
     printf("Server listening on port %d...\n", PORT);

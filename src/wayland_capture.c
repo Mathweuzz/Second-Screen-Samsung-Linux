@@ -2,74 +2,116 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <gio/gio.h>
+#include <glib.h>
 
 #define PORTAL_BUS_NAME "org.freedesktop.portal.Desktop"
 #define SCREENCAST_OBJECT_PATH "/org/freedesktop/portal/desktop"
 #define SCREENCAST_INTERFACE "org.freedesktop.portal.ScreenCast"
+#define REQUEST_INTERFACE "org.freedesktop.portal.Request"
 
-int init_wayland_capture() {
-    printf("[Wayland] Iniciando requisição para captura de tela via XDG Desktop Portal...\n");
+typedef struct {
+    GDBusConnection *connection;
+    GMainLoop *loop;
+    char *session_path;
+} PortalContext;
 
-    GError *error = NULL;
-    GDBusConnection *connection = g_bus_get_sync(G_BUS_TYPE_SESSION, NULL, &error);
+PortalContext ctx = {0};
+
+static void start_screencast();
+
+static void on_select_sources_response(GDBusConnection *connection,
+                                       const gchar *sender_name,
+                                       const gchar *object_path,
+                                       const gchar *interface_name,
+                                       const gchar *signal_name,
+                                       GVariant *parameters,
+                                       gpointer user_data) {
+    (void)connection; (void)sender_name; (void)object_path; (void)interface_name; (void)signal_name; (void)user_data;
     
-    if (!connection) {
-        fprintf(stderr, "[Wayland] Erro ao conectar no D-Bus: %s\n", error->message);
-        g_error_free(error);
-        return -1;
+    guint32 response_code;
+    g_variant_get(parameters, "(u@a{sv})", &response_code, NULL);
+
+    if (response_code != 0) {
+        fprintf(stderr, "SelectSources failed or cancelled (Code: %d)\n", response_code);
+        g_main_loop_quit(ctx.loop);
+        return;
     }
 
-    printf("[Wayland] Conexão D-Bus estabelecida com sucesso.\n");
-    
-    // Preparar as opções para CreateSession (um dicionário de string -> variant)
+    printf("Starting screencast...\n");
+    start_screencast();
+}
+
+static void create_session() {
+    GError *error = NULL;
     GVariantBuilder builder;
     g_variant_builder_init(&builder, G_VARIANT_TYPE_VARDICT);
     g_variant_builder_add(&builder, "{sv}", "session_handle_token", g_variant_new_string("second_screen_session"));
     
     GVariant *options = g_variant_builder_end(&builder);
     
-    printf("[Wayland] Solicitando nova Sessão de ScreenCast ao XDG Portal...\n");
+    printf("Requesting ScreenCast Session...\n");
     
-    // Fazer a chamada síncrona para CreateSession. O dbus sempre espera os args numa tupla.
     GVariant *result = g_dbus_connection_call_sync(
-        connection,
+        ctx.connection,
         PORTAL_BUS_NAME,
         SCREENCAST_OBJECT_PATH,
         SCREENCAST_INTERFACE,
         "CreateSession",
         g_variant_new("(@a{sv})", options),
-        NULL, // Return type
+        NULL,
         G_DBUS_CALL_FLAGS_NONE,
-        -1, // Timeout
+        -1,
         NULL,
         &error
     );
 
     if (!result) {
-        fprintf(stderr, "[Wayland] Falha ao criar sessão de ScreenCast: %s\n", error->message);
+        fprintf(stderr, "CreateSession failed: %s\n", error->message);
         g_error_free(error);
-        g_object_unref(connection);
-        return -1;
+        return;
     }
 
-    // Pega o caminho ONDE a sessão foi criada lá dentro do variant da tupla '(o)' retornado.
-    // O retorno de CreateSession (e das outras) na verdade vem pelo Sinal de Resposta, não direto no objeto.
-    // Mas para fins de manter a didática, vamos extrair a string da Request Handle gerada.
-    const gchar *request_handle = NULL;
-    g_variant_get(result, "(&o)", &request_handle);
+    const gchar *request_path = NULL;
+    g_variant_get(result, "(&o)", &request_path);
     
-    printf("\n>>> [SUCESSO] Sessão requerida! Handle da Requisição: %s\n", request_handle);
-    
-    // NOTA: No padrão XDG, o CreateSession retorna o Request Object Path.
-    // Precisamos escutar o sinal 'Response' desse request para pegar o 'Session Object Path' real,
-    // para então podermos chamar SelectSources nele.
-    // Vou colocar a estrutura base para a subscrição de Sinais do GDBus:
+    g_dbus_connection_signal_subscribe(
+        ctx.connection,
+        PORTAL_BUS_NAME,
+        REQUEST_INTERFACE,
+        "Response",
+        request_path,
+        NULL,
+        G_DBUS_SIGNAL_FLAGS_NO_MATCH_RULE,
+        on_create_session_response,
+        NULL,
+        NULL
+    );
 
-    printf("\n[Wayland] (Ação Requerida) Precisamos escutar os sinais Assíncronos do D-Bus para continuar o Handshake do ScreenCast...\n");
-    printf("[Wayland] O código atual fará o setup do loop principal do GLib depois.\n");
-    
     g_variant_unref(result);
-    g_object_unref(connection);
+}
 
+static void *wayland_loop_thread(void *arg) {
+    (void)arg;
+    
+    GError *error = NULL;
+    ctx.connection = g_bus_get_sync(G_BUS_TYPE_SESSION, NULL, &error);
+    
+    if (!ctx.connection) {
+        fprintf(stderr, "Failed to connect to D-Bus: %s\n", error->message);
+        return NULL;
+    }
+
+    ctx.loop = g_main_loop_new(NULL, FALSE);
+    create_session();
+    g_main_loop_run(ctx.loop);
+    
+    return NULL;
+}
+
+int init_wayland_capture() {
+    printf("Initializing Wayland capture thread...\n");
+    GThread *thread = g_thread_new("wayland_dbus", wayland_loop_thread, NULL);
+    if (!thread) return -1;
+    g_thread_unref(thread);
     return 0;
 }
