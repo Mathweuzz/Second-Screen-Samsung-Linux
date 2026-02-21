@@ -4,9 +4,62 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #define PORT 8080
-#define BUFFER_SIZE 2048
+#define BUFFER_SIZE 8192
+
+void send_file(int client_socket, const char *filepath, const char *content_type) {
+    int file_fd = open(filepath, O_RDONLY);
+    if (file_fd < 0) {
+        perror("Failed to open file");
+        const char *not_found = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n404 Not Found";
+        send(client_socket, not_found, strlen(not_found), 0);
+        return;
+    }
+
+    struct stat file_stat;
+    fstat(file_fd, &file_stat);
+    long file_size = file_stat.st_size;
+
+    char header[512];
+    snprintf(header, sizeof(header),
+             "HTTP/1.1 200 OK\r\n"
+             "Content-Type: %s\r\n"
+             "Content-Length: %ld\r\n"
+             "Connection: close\r\n\r\n",
+             content_type, file_size);
+
+    send(client_socket, header, strlen(header), 0);
+
+    char file_buffer[BUFFER_SIZE];
+    ssize_t bytes_read;
+    while ((bytes_read = read(file_fd, file_buffer, sizeof(file_buffer))) > 0) {
+        send(client_socket, file_buffer, bytes_read, 0);
+    }
+
+    close(file_fd);
+}
+
+void handle_request(int client_socket, char *request) {
+    char method[16], path[256];
+    if (sscanf(request, "%15s %255s", method, path) != 2) {
+        close(client_socket);
+        return;
+    }
+
+    printf("Request: %s %s\n", method, path);
+
+    if (strcmp(method, "GET") == 0) {
+        if (strcmp(path, "/") == 0 || strcmp(path, "/index.html") == 0) {
+            send_file(client_socket, "client/index.html", "text/html");
+        } else {
+            const char *not_found = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nFile Not Found";
+            send(client_socket, not_found, strlen(not_found), 0);
+        }
+    }
+}
 
 int main() {
     int server_fd, new_socket;
@@ -47,34 +100,12 @@ int main() {
             continue;
         }
 
-        printf("New connection from %s:%d\n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
-        
+        memset(buffer, 0, BUFFER_SIZE);
         int valread = read(new_socket, buffer, BUFFER_SIZE - 1);
         if (valread > 0) {
-            buffer[valread] = '\0';
-            char *first_line = strtok(buffer, "\r\n");
-            if (first_line) {
-                printf("Request: %s\n", first_line);
-            }
+            handle_request(new_socket, buffer);
         }
-
-        const char *response = 
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/html; charset=UTF-8\r\n"
-            "Connection: close\r\n\r\n"
-            "<!DOCTYPE html>"
-            "<html>"
-            "<head>"
-            "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
-            "<style>body { font-family: sans-serif; text-align: center; margin-top: 50px; background: #222; color: #fff; }</style>"
-            "</head>"
-            "<body>"
-            "<h1>Connection Established</h1>"
-            "<p>Server is running.</p>"
-            "</body>"
-            "</html>";
-
-        send(new_socket, response, strlen(response), 0);
+        
         close(new_socket);
     }
 
