@@ -1,4 +1,5 @@
 #include "pipewire_capture.h"
+#include "mjpeg_stream.h"
 #include <pipewire/pipewire.h>
 #include <spa/param/video/format-utils.h>
 #include <stdio.h>
@@ -8,6 +9,7 @@
 struct stream_data {
     struct pw_main_loop *loop;
     struct pw_stream *stream;
+    struct spa_video_info format;
 };
 
 static void on_process(void *userdata) {
@@ -25,13 +27,37 @@ static void on_process(void *userdata) {
         if (frame_count++ % 60 == 0) {
             printf("Frame grabbed! Size: %d bytes (printing 1 out of 60 frames to avoid spam)\n", buf->datas[0].chunk->size);
         }
+
+        uint32_t width = data->format.info.raw.size.width;
+        uint32_t height = data->format.info.raw.size.height;
+        uint32_t stride = buf->datas[0].chunk->stride;
+        
+        // Call our MJPEG compression pipeline asynchronously
+        update_latest_frame(buf->datas[0].data, width, height, stride);
     }
 
     pw_stream_queue_buffer(data->stream, b);
 }
 
+static void on_param_changed(void *userdata, uint32_t id, const struct spa_pod *param) {
+    struct stream_data *data = userdata;
+
+    if (!param || id != SPA_PARAM_Format)
+        return;
+
+    if (spa_format_parse(param, &data->format.media_type, &data->format.media_subtype) < 0)
+        return;
+
+    if (data->format.media_type != SPA_MEDIA_TYPE_video || data->format.media_subtype != SPA_MEDIA_SUBTYPE_raw)
+        return;
+
+    spa_format_video_raw_parse(param, &data->format.info.raw);
+    printf("PipeWire Video Format Negotiated: %dx%d\n", data->format.info.raw.size.width, data->format.info.raw.size.height);
+}
+
 static const struct pw_stream_events stream_events = {
     PW_VERSION_STREAM_EVENTS,
+    .param_changed = on_param_changed,
     .process = on_process,
 };
 

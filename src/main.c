@@ -8,9 +8,10 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "mjpeg_stream.h"
+
 #define PORT 8080
 #define BUFFER_SIZE 8192
-
 
 void send_file(int client_socket, const char *filepath, const char *content_type) {
     int file_fd = open(filepath, O_RDONLY);
@@ -56,6 +57,9 @@ void handle_request(int client_socket, char *request) {
     if (strcmp(method, "GET") == 0) {
         if (strcmp(path, "/") == 0 || strcmp(path, "/index.html") == 0) {
             send_file(client_socket, "client/index.html", "text/html");
+        } else if (strcmp(path, "/stream.mjpeg") == 0) {
+            handle_mjpeg_client(client_socket);
+            // After the loop breaks, we let the main logic close the socket or it will close upstream.
         } else {
             const char *not_found = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nFile Not Found";
             send(client_socket, not_found, strlen(not_found), 0);
@@ -96,6 +100,9 @@ int main() {
         perror("listen");
         exit(EXIT_FAILURE);
     }
+
+    // Initialize synchronization variables for MJPEG Pipeline
+    init_mjpeg_stream();
 
     // Initialize Wayland connection before accepting web connections.
     init_wayland_capture();
