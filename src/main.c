@@ -4,11 +4,13 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include "wayland_capture.h"
 #include <sys/stat.h>
 #include <fcntl.h>
 
 #define PORT 8080
 #define BUFFER_SIZE 8192
+
 
 void send_file(int client_socket, const char *filepath, const char *content_type) {
     int file_fd = open(filepath, O_RDONLY);
@@ -62,6 +64,9 @@ void handle_request(int client_socket, char *request) {
 }
 
 int main() {
+    setbuf(stdout, NULL);
+    setbuf(stderr, NULL);
+    
     int server_fd, new_socket;
     struct sockaddr_in address;
     int opt = 1;
@@ -91,6 +96,9 @@ int main() {
         perror("listen");
         exit(EXIT_FAILURE);
     }
+
+    // Inicializa a conexão com o Wayland via DBus antes de aceitar conexões web.
+    init_wayland_capture();
 
     printf("Server listening on port %d...\n", PORT);
 
