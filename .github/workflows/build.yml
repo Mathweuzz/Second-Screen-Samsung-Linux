@@ -1,0 +1,32 @@
+name: C Build CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libpipewire-0.3-dev libglib2.0-dev libturbojpeg0-dev pkg-config gcc make
+
+    - name: Build Second Screen
+      run: |
+        make clean
+        make
+        
+    - name: Run checks
+      run: |
+        if [ ! -f "second_screen" ]; then
+          echo "Binary was not compiled successfully."
+          exit 1
+        fi
+        echo "Build Verified Successfully!"
