@@ -52,11 +52,21 @@ int init_wayland_capture() {
         return -1;
     }
 
-    // O retorno de CreateSession é o path do objeto da requisição (tipo 'o')
-    const char *request_handle = NULL;
+    // Pega o caminho ONDE a sessão foi criada lá dentro do variant da tupla '(o)' retornado.
+    // O retorno de CreateSession (e das outras) na verdade vem pelo Sinal de Resposta, não direto no objeto.
+    // Mas para fins de manter a didática, vamos extrair a string da Request Handle gerada.
+    const gchar *request_handle = NULL;
     g_variant_get(result, "(&o)", &request_handle);
     
-    printf("\n>>> [SUCESSO] Sessão criada no Portal! Handle da Requisição: %s\n", request_handle);
+    printf("\n>>> [SUCESSO] Sessão requerida! Handle da Requisição: %s\n", request_handle);
+    
+    // NOTA: No padrão XDG, o CreateSession retorna o Request Object Path.
+    // Precisamos escutar o sinal 'Response' desse request para pegar o 'Session Object Path' real,
+    // para então podermos chamar SelectSources nele.
+    // Vou colocar a estrutura base para a subscrição de Sinais do GDBus:
+
+    printf("\n[Wayland] (Ação Requerida) Precisamos escutar os sinais Assíncronos do D-Bus para continuar o Handshake do ScreenCast...\n");
+    printf("[Wayland] O código atual fará o setup do loop principal do GLib depois.\n");
     
     g_variant_unref(result);
     g_object_unref(connection);
