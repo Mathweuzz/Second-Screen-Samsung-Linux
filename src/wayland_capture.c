@@ -115,8 +115,13 @@ static void select_sources() {
     GVariantBuilder builder;
     g_variant_builder_init(&builder, G_VARIANT_TYPE_VARDICT);
     
-    g_variant_builder_add(&builder, "{sv}", "types", g_variant_new_uint32(1));
+    // AvailableSourceTypes em GNOME/Mutter:
+    // 1 = Tela Física | 2 = Janela | 4 = Tela Virtual Estendida (Headless)
+    g_variant_builder_add(&builder, "{sv}", "types", g_variant_new_uint32(4));
     g_variant_builder_add(&builder, "{sv}", "multiple", g_variant_new_boolean(FALSE));
+    
+    // 1 = Hidden, 2 = Embedded (drawn in the video stream), 4 = Metadata
+    g_variant_builder_add(&builder, "{sv}", "cursor_mode", g_variant_new_uint32(2));
 
     GVariant *result = g_dbus_connection_call_sync(
         ctx.connection,

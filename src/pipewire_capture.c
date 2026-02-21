@@ -22,7 +22,7 @@ static void on_process(void *userdata) {
     }
 
     buf = b->buffer;
-    if (buf->datas[0].data != NULL) {
+    if (buf->datas[0].data != NULL && buf->datas[0].chunk->size > 0) {
         static int frame_count = 0;
         if (frame_count++ % 60 == 0) {
             printf("Frame grabbed! Size: %d bytes (printing 1 out of 60 frames to avoid spam)\n", buf->datas[0].chunk->size);

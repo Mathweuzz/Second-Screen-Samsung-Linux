@@ -56,6 +56,18 @@ void update_latest_frame(const uint8_t *bgra_pixels, int width, int height, int 
     tjDestroy(_jpegCompressor);
 }
 
+// Helper para garantir que 100% dos bytes da imagem vão chegar via TCP, mesmo em gargalos de Wi-Fi
+static int send_all(int socket, const void *buffer, size_t length) {
+    size_t bytes_sent = 0;
+    const uint8_t *ptr = buffer;
+    while (bytes_sent < length) {
+        ssize_t res = send(socket, ptr + bytes_sent, length - bytes_sent, MSG_NOSIGNAL);
+        if (res <= 0) return -1;
+        bytes_sent += res;
+    }
+    return 0;
+}
+
 void handle_mjpeg_client(int client_socket) {
     const char *header = 
         "HTTP/1.1 200 OK\r\n"
@@ -64,9 +76,13 @@ void handle_mjpeg_client(int client_socket) {
         "Content-Type: multipart/x-mixed-replace; boundary=--myboundary\r\n"
         "Connection: close\r\n\r\n";
     
-    if (send(client_socket, header, strlen(header), 0) < 0) {
+    if (send_all(client_socket, header, strlen(header)) < 0) {
         return;
     }
+
+    uint8_t *local_buffer = NULL;
+    unsigned long local_capacity = 0;
+    unsigned long local_size = 0;
 
     while (1) {
         pthread_mutex_lock(&global_frame.mutex);
@@ -79,31 +95,41 @@ void handle_mjpeg_client(int client_socket) {
             continue;
         }
 
+        // Deep copy the JPEG buffer so we can release the Mutex instantly
+        local_size = global_frame.jpeg_size;
+        if (local_size > local_capacity) {
+            local_capacity = local_size + (1024 * 50); // Add 50kb padding to reduce frequent reallocs
+            local_buffer = realloc(local_buffer, local_capacity);
+        }
+        memcpy(local_buffer, global_frame.jpeg_buffer, local_size);
+
+        // Instantly unlock so the PipeWire GPU thread can write new frames without waiting for TCP
+        pthread_mutex_unlock(&global_frame.mutex);
+
         char frame_header[256];
         int header_len = snprintf(frame_header, sizeof(frame_header),
                  "--myboundary\r\n"
                  "Content-Type: image/jpeg\r\n"
                  "Content-Length: %lu\r\n\r\n", 
-                 global_frame.jpeg_size);
+                 local_size);
 
         // Send Boundary Header
-        if (send(client_socket, frame_header, header_len, 0) < 0) {
-            pthread_mutex_unlock(&global_frame.mutex);
+        if (send_all(client_socket, frame_header, header_len) < 0) {
             break; // Client disconnected
         }
 
         // Send JPEG Bytes
-        if (send(client_socket, global_frame.jpeg_buffer, global_frame.jpeg_size, 0) < 0) {
-            pthread_mutex_unlock(&global_frame.mutex);
+        if (send_all(client_socket, local_buffer, local_size) < 0) {
             break; // Client disconnected
         }
         
         // Send trailing CRLF for the multipart spec
-        if (send(client_socket, "\r\n", 2, 0) < 0) {
-            pthread_mutex_unlock(&global_frame.mutex);
+        if (send_all(client_socket, "\r\n", 2) < 0) {
             break;
         }
+    }
 
-        pthread_mutex_unlock(&global_frame.mutex);
+    if (local_buffer) {
+        free(local_buffer);
     }
 }
