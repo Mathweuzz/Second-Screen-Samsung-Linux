@@ -7,14 +7,21 @@ This project implements a high-performance, ultra-low latency virtual display se
 
 Handling raw video buffers at 60 Frames Per Second (FPS) in user-space introduces critical memory bandwidth constraints. Let $W$ and $H$ represent the horizontal and vertical resolution respectively, $C$ the color depth in bytes per pixel (typically 4 for BGRA), and $F$ the target frame rate. The uncompressed memory throughput $B_{raw}$ required is defined as:
 
-$$ B_{raw} = W \times H \times C \times F $$
+$$
+B_{raw} = W \times H \times C \times F
+$$
 
 For a standard 1080p stream at 60 FPS:
-$$ B_{raw} = 1920 \times 1080 \times 4 \times 60 \approx 497.66 \text{ MB/s} $$
+
+$$
+B_{raw} = 1920 \times 1080 \times 4 \times 60 \approx 497.66 \text{ MB/s}
+$$
 
 Processing $\approx 500 \text{ MB/s}$ on the CPU necessitates an execution pipeline where the total processing latency per frame $T_{total}$ satisfies a strict upper bound constraint:
 
-$$ T_{total} = t_{dequeue} + t_{compress} + t_{copy} \le \frac{1000}{F} \text{ ms} $$
+$$
+T_{total} = t_{dequeue} + t_{compress} + t_{copy} \le \frac{1000}{F} \text{ ms}
+$$
 
 For $F = 60$, $T_{total} \le 16.66 \text{ ms} $. To achieve this deterministic execution, we utilize Single Instruction, Multiple Data (SIMD) acceleration via `libjpeg-turbo`. This brings the algorithmic compression complexity down to $t_{compress} \approx 2-5 \text{ ms}$, ensuring zero frame dropping and robust V-Sync synchronization.
 
